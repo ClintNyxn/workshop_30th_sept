@@ -3,50 +3,62 @@ const app = express()
 const fs = require('fs')
 const path = require('path')
 
-path_to_db = path.join(__dirname,'db.json')
+const path_to_db = path.join(__dirname, 'db.json')
 
-// promise stuff
+app.use(express.json())
 
-// new Promise(rej,res)=>{setTimeout(()=>resolve,1500)}
+let cache = {}
 
-
-// async function readFileWithDelay(){
-//  setTimeout(() => {
-//    const read = await fs.readFile(path_to_db,'utf8')
-//    console.log(read)
-//  }, 1500); 
-// }
-
-cache = {
-  /product : products, // whenever a post req is successfully made, we should change this to latest value, 
-  // /product/1 : products[0]
-  
-  // try time-to-live to invalidating this.
-  // read the doc on slack, 
-  // learn about response for setheader cache 
-  // learn about cache-hit and cache-miss
-} // what is the structure here ??
+const TTL = 60 * 1000
 
 app.get('/', (req, res) => {
   res.send('Hello World!')
 })
 
-app.get('/product',async(req,res)=>{
-  
-  let key = req.url
-  let value = cache[key]
+app.get('/product', (req, res) => {
+  const key = req.url
 
-  if (value) return res.json(value)
+  if (cache[key] && Date.now() < cache[key].expiry) {
+    res.setHeader('X-Cache', 'HIT')
+    return res.json(cache[key].data)
+  }
 
-  const read = fs.readFileSync(path_to_db,'utf8')
-  res.status(200).send(JSON.parse(read))
+  const read = fs.readFileSync(path_to_db, 'utf8')
+  const products = JSON.parse(read)
+
+  cache[key] = {
+    data: products,
+    expiry: Date.now() + TTL
+  }
+
+  res.setHeader('X-Cache', 'MISS')
+  res.json(products)
 })
 
-app.get('/product/:id',async(req,res)=>{
-  const read = fs.readFileSync(path_to_db,'utf8')
+app.get('/product/:id', (req, res) => {
+  const key = req.url
+
+  if (cache[key] && Date.now() < cache[key].expiry) {
+    res.setHeader('X-Cache', 'HIT')
+    return res.json(cache[key].data)
+  }
+
+  const read = fs.readFileSync(path_to_db, 'utf8')
+
   const product = JSON.parse(read)
     .find(i => i.id == req.params.id)
-  res.status(200).send(product)
+
+  if (!product) return res.status(404).send('Product not found')
+
+  cache[key] = {
+    data: product,
+    expiry: Date.now() + TTL
+  }
+
+  res.setHeader('X-Cache', 'MISS')
+  res.json(product)
 })
 
-app.listen('3000')
+app.listen(3000, () => {
+  console.log('Server running on port 3000')
+})
